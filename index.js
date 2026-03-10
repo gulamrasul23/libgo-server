@@ -83,22 +83,33 @@ async function run() {
       }
       next();
     };
+    //Middleware for customer, it must be write after verifyFBToken---
+
+    const verifyCustomer = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCall.findOne(query);
+      if (!user || user.role !== "customer") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
 
     //Contact api---------------
 
-    
-app.post("/contact", async (req, res) => {
-  try {
-    const contactMessage = req.body;
-    contactMessage.createdAt = new Date(); 
-    
-    const result = await contactCall.insertOne(contactMessage);
-    res.send(result);
-  } catch (error) {
-    console.error("Error saving contact message:", error);
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-});
+
+    app.post("/contact", async (req, res) => {
+      try {
+        const contactMessage = req.body;
+        contactMessage.createdAt = new Date();
+
+        const result = await contactCall.insertOne(contactMessage);
+        res.send(result);
+      } catch (error) {
+        console.error("Error saving contact message:", error);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
 
     //User api------------------
 
@@ -177,7 +188,7 @@ app.post("/contact", async (req, res) => {
 
     //Admin state api -----------
 
-    app.get("/admin/stats",verifyFBToken, verifyAdmin, async (req, res) => {
+    app.get("/admin/stats", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
 
         const totalBooks = await bookCall.estimatedDocumentCount();
@@ -187,7 +198,7 @@ app.post("/contact", async (req, res) => {
           status: "Pending",
         });
 
-        
+
 
         // ৩. Bar Chart 
         const monthlyOrdersRaw = await orderCall
@@ -225,7 +236,7 @@ app.post("/contact", async (req, res) => {
           ])
           .toArray();
 
-        
+
         const monthNames = [
           "Jan",
           "Feb",
@@ -241,9 +252,9 @@ app.post("/contact", async (req, res) => {
           "Dec",
         ];
 
-       
+
         const formatMonthlyData = (rawData, keyName) => {
-          
+
           const formatted = monthNames.map((name) => ({ name, [keyName]: 0 }));
           rawData.forEach((item) => {
             if (item._id >= 1 && item._id <= 12) {
@@ -256,10 +267,10 @@ app.post("/contact", async (req, res) => {
         const monthlyOrdersData = formatMonthlyData(monthlyOrdersRaw, "orders");
         const userGrowthData = formatMonthlyData(userGrowthRaw, "users");
 
-       
+
         res.send({
           statsData: { totalBooks, totalUsers, totalOrders, pendingOrders },
-          
+
           monthlyOrdersData,
           userGrowthData,
         });
@@ -274,62 +285,62 @@ app.post("/contact", async (req, res) => {
     app.get("/books/manage-books",
       verifyFBToken,
       verifyAdmin, async (req, res) => {
-      const { limit, page, searchText, priceFilters, dateFilters } = req.query;
-      const query = {};
+        const { limit, page, searchText, priceFilters, dateFilters } = req.query;
+        const query = {};
 
-      if (searchText) {
-        query.bookTitle = { $regex: searchText, $options: "i" };
-      }
-      if (priceFilters) {
-        const priceArray = Array.isArray(priceFilters)
-          ? priceFilters
-          : [priceFilters];
-        query.$or = priceArray.map((range) => {
-          const [min, max] = range.split("-").map(Number);
-          return { price: { $gte: min, $lte: max } };
-        });
-      }
-      // Date filter
-      if (dateFilters) {
-        const dateArray = Array.isArray(dateFilters)
-          ? dateFilters
-          : [dateFilters];
-        const now = new Date();
-
-        const dateConditions = dateArray.map((days) => {
-          const d = new Date();
-          d.setDate(now.getDate() - Number(days));
-          return { createdAt: { $gte: d.toISOString() } };
-        });
-
-        // Combine with existing $or
-        if (query.$or) {
-          query.$and = [{ $or: query.$or }, { $or: dateConditions }];
-          delete query.$or;
-        } else {
-          query.$or = dateConditions;
+        if (searchText) {
+          query.bookTitle = { $regex: searchText, $options: "i" };
         }
-      }
-      const pageNumber = parseInt(page) || 1;
-      const limitNumber = parseInt(limit) || 8;
-      const skipNumber = (pageNumber - 1) * limitNumber;
+        if (priceFilters) {
+          const priceArray = Array.isArray(priceFilters)
+            ? priceFilters
+            : [priceFilters];
+          query.$or = priceArray.map((range) => {
+            const [min, max] = range.split("-").map(Number);
+            return { price: { $gte: min, $lte: max } };
+          });
+        }
+        // Date filter
+        if (dateFilters) {
+          const dateArray = Array.isArray(dateFilters)
+            ? dateFilters
+            : [dateFilters];
+          const now = new Date();
 
-      const totalBooks = await bookCall.countDocuments(query);
+          const dateConditions = dateArray.map((days) => {
+            const d = new Date();
+            d.setDate(now.getDate() - Number(days));
+            return { createdAt: { $gte: d.toISOString() } };
+          });
 
-      let cursor = bookCall
-        .find(query)
-        .sort({ createdAt: -1 })
-        .skip(skipNumber)
-        .limit(limitNumber);
+          // Combine with existing $or
+          if (query.$or) {
+            query.$and = [{ $or: query.$or }, { $or: dateConditions }];
+            delete query.$or;
+          } else {
+            query.$or = dateConditions;
+          }
+        }
+        const pageNumber = parseInt(page) || 1;
+        const limitNumber = parseInt(limit) || 8;
+        const skipNumber = (pageNumber - 1) * limitNumber;
 
-      const result = await cursor.toArray();
+        const totalBooks = await bookCall.countDocuments(query);
 
-      if (req.query.page) {
-        res.send({ books: result, totalBooks });
-      } else {
-        res.send(result);
-      }
-    });
+        let cursor = bookCall
+          .find(query)
+          .sort({ createdAt: -1 })
+          .skip(skipNumber)
+          .limit(limitNumber);
+
+        const result = await cursor.toArray();
+
+        if (req.query.page) {
+          res.send({ books: result, totalBooks });
+        } else {
+          res.send(result);
+        }
+      });
 
     app.patch(
       "/books/manage-books/:id",
@@ -502,7 +513,7 @@ app.post("/contact", async (req, res) => {
 
     // Order api----------------
 
-    app.post("/orders", verifyFBToken, async (req, res) => {
+    app.post("/orders", verifyFBToken, verifyCustomer, async (req, res) => {
       const newOrder = req.body;
       newOrder.createdAt = new Date();
       const result = await orderCall.insertOne(newOrder);
@@ -536,7 +547,7 @@ app.post("/contact", async (req, res) => {
       const result = await cursor.toArray();
       res.send(result);
     });
-    app.get("/orders/my-order", verifyFBToken, async (req, res) => {
+    app.get("/orders/my-order", verifyFBToken, verifyCustomer, async (req, res) => {
       const { email } = req.query;
       const query = {};
       if (email) {
@@ -566,7 +577,7 @@ app.post("/contact", async (req, res) => {
 
     // Payment api --------------
 
-    app.post("/create-checkout-session", verifyFBToken, async (req, res) => {
+    app.post("/create-checkout-session", verifyFBToken, verifyCustomer, async (req, res) => {
       const paymentInfo = req.body;
       const amount = parseInt(paymentInfo.price) * 100;
       const session = await stripe.checkout.sessions.create({
@@ -639,7 +650,7 @@ app.post("/contact", async (req, res) => {
       res.send({ success: false });
     });
 
-    app.get("/invoices", verifyFBToken, async (req, res) => {
+    app.get("/invoices", verifyFBToken, verifyCustomer, async (req, res) => {
       const { email, paymentStatus } = req.query;
       const query = {};
       if (email) {
@@ -657,7 +668,7 @@ app.post("/contact", async (req, res) => {
 
     // Wishlist api -----------------------
 
-    app.post("/wishlists", verifyFBToken, async (req, res) => {
+    app.post("/wishlists", verifyFBToken, verifyCustomer, async (req, res) => {
       const { customerEmail, wishlistId } = req.body;
 
       const existingItem = await wishlistCall.findOne({
@@ -675,7 +686,7 @@ app.post("/contact", async (req, res) => {
       res.send(result);
     });
 
-    app.get("/wishlists/my-wishlist", verifyFBToken, async (req, res) => {
+    app.get("/wishlists/my-wishlist", verifyFBToken, verifyCustomer, async (req, res) => {
       const email = req.decoded_email;
       const query = { customerEmail: email };
       const cursor = wishlistCall.find(query).sort({ createdAt: -1 });
